@@ -1,10 +1,12 @@
 ﻿import os
 import sys
+import ast
 import time
 import queue
 import threading
 import subprocess
 import shutil
+import importlib.util
 import py_compile
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -17,6 +19,16 @@ ICON_PNG_PATH = os.path.join(ICON_DIR, "오아시스_로고01.png")
 AUTHOR_NAME = "PHIL JK"
 AUTHOR_EMAIL = "kacang@nate.com"
 AUTHOR_HP = "+62 812 8094 3179"
+
+PACKAGE_NAME_MAP = {
+    "PIL": "Pillow",
+    "cv2": "opencv-python",
+    "yaml": "PyYAML",
+    "sklearn": "scikit-learn",
+    "bs4": "beautifulsoup4",
+    "Crypto": "pycryptodome",
+    "fitz": "PyMuPDF",
+}
 
 
 class PythonARunner(tk.Tk):
@@ -57,7 +69,7 @@ class PythonARunner(tk.Tk):
         if len(sys.argv) < 2:
             return None
         candidate = os.path.abspath(sys.argv[1])
-        if os.path.isfile(candidate) and candidate.lower().endswith('.py'):
+        if os.path.isfile(candidate) and candidate.lower().endswith(".py"):
             return candidate
         return None
 
@@ -74,10 +86,10 @@ class PythonARunner(tk.Tk):
         folder_bar.pack(fill=tk.X, padx=6, pady=6)
         ttk.Button(folder_bar, text="폴더 불러오기", command=self.choose_folder).pack(side=tk.LEFT)
 
-        self.tree = ttk.Treeview(left, show='tree')
+        self.tree = ttk.Treeview(left, show="tree")
         self.tree.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
-        self.tree.bind('<<TreeviewOpen>>', self._on_tree_open)
-        self.tree.bind('<Double-1>', self._on_tree_double_click)
+        self.tree.bind("<<TreeviewOpen>>", self._on_tree_open)
+        self.tree.bind("<Double-1>", self._on_tree_double_click)
 
         editor_frame = ttk.Frame(right)
         output_frame = ttk.Frame(right)
@@ -142,11 +154,11 @@ class PythonARunner(tk.Tk):
         self.config(menu=m)
 
     def _bind_shortcuts(self):
-        self.bind('<Control-o>', lambda e: self.choose_file())
-        self.bind('<Control-s>', lambda e: self.save_file())
-        self.bind('<Control-Shift-S>', lambda e: self.save_file_as())
-        self.bind('<F5>', lambda e: self.run_current_file())
-        self.bind('<Shift-F5>', lambda e: self.stop_run())
+        self.bind("<Control-o>", lambda e: self.choose_file())
+        self.bind("<Control-s>", lambda e: self.save_file())
+        self.bind("<Control-Shift-S>", lambda e: self.save_file_as())
+        self.bind("<F5>", lambda e: self.run_current_file())
+        self.bind("<Shift-F5>", lambda e: self.stop_run())
 
     def _configure_icon(self):
         if os.path.isfile(ICON_ICO_PATH):
@@ -154,7 +166,6 @@ class PythonARunner(tk.Tk):
                 self.iconbitmap(default=ICON_ICO_PATH)
             except Exception:
                 pass
-
         if os.path.isfile(ICON_PNG_PATH):
             try:
                 self._icon_image = tk.PhotoImage(file=ICON_PNG_PATH)
@@ -209,7 +220,7 @@ class PythonARunner(tk.Tk):
     def _load_tree(self, root_path):
         self.tree.delete(*self.tree.get_children())
         self.tree_nodes.clear()
-        root_id = self.tree.insert('', 'end', text=os.path.basename(root_path) or root_path, open=True, values=(root_path,))
+        root_id = self.tree.insert("", "end", text=os.path.basename(root_path) or root_path, open=True, values=(root_path,))
         self.tree_nodes[root_id] = root_path
         self._add_tree_placeholder(root_id, root_path)
 
@@ -221,11 +232,11 @@ class PythonARunner(tk.Tk):
         has_children = False
         for name in entries:
             full = os.path.join(path, name)
-            if os.path.isdir(full) or full.lower().endswith('.py'):
+            if os.path.isdir(full) or full.lower().endswith(".py"):
                 has_children = True
                 break
         if has_children:
-            self.tree.insert(parent_id, 'end', text='__placeholder__')
+            self.tree.insert(parent_id, "end", text="__placeholder__")
 
     def _on_tree_open(self, _evt):
         item = self.tree.focus()
@@ -235,7 +246,7 @@ class PythonARunner(tk.Tk):
         if not path or not os.path.isdir(path):
             return
         children = self.tree.get_children(item)
-        if len(children) == 1 and self.tree.item(children[0], 'text') == '__placeholder__':
+        if len(children) == 1 and self.tree.item(children[0], "text") == "__placeholder__":
             self.tree.delete(children[0])
             self._populate_tree(item, path)
 
@@ -248,11 +259,11 @@ class PythonARunner(tk.Tk):
         for name in entries:
             full = os.path.join(path, name)
             if os.path.isdir(full):
-                node = self.tree.insert(parent_id, 'end', text=name, values=(full,))
+                node = self.tree.insert(parent_id, "end", text=name, values=(full,))
                 self.tree_nodes[node] = full
                 self._add_tree_placeholder(node, full)
-            elif full.lower().endswith('.py'):
-                node = self.tree.insert(parent_id, 'end', text=name, values=(full,))
+            elif full.lower().endswith(".py"):
+                node = self.tree.insert(parent_id, "end", text=name, values=(full,))
                 self.tree_nodes[node] = full
 
     def _on_tree_double_click(self, _evt):
@@ -260,11 +271,11 @@ class PythonARunner(tk.Tk):
         if not item:
             return
         path = self._item_path(item)
-        if path and os.path.isfile(path) and path.lower().endswith('.py'):
+        if path and os.path.isfile(path) and path.lower().endswith(".py"):
             self.open_file(path)
 
     def _item_path(self, item_id):
-        vals = self.tree.item(item_id, 'values')
+        vals = self.tree.item(item_id, "values")
         if vals:
             return vals[0]
         return self.tree_nodes.get(item_id)
@@ -272,10 +283,10 @@ class PythonARunner(tk.Tk):
     def open_file(self, path):
         path = os.path.abspath(path)
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 data = f.read()
         except UnicodeDecodeError:
-            with open(path, 'r', encoding='cp949', errors='replace') as f:
+            with open(path, "r", encoding="cp949", errors="replace") as f:
                 data = f.read()
         except Exception as e:
             messagebox.showerror("오류", f"파일을 열 수 없습니다.\n{e}")
@@ -283,8 +294,8 @@ class PythonARunner(tk.Tk):
 
         self.current_file = path
         self.current_folder = os.path.dirname(path)
-        self.editor.delete('1.0', tk.END)
-        self.editor.insert('1.0', data)
+        self.editor.delete("1.0", tk.END)
+        self.editor.insert("1.0", data)
         self.file_label.config(text=f"파일: {path}")
         self.status_label.config(text="상태: 파일 로드 완료")
 
@@ -297,7 +308,7 @@ class PythonARunner(tk.Tk):
         return self._write_current_buffer(self.current_file)
 
     def save_file_as(self):
-        target = filedialog.asksaveasfilename(defaultextension='.py', filetypes=[("Python Files", "*.py"), ("All Files", "*.*")])
+        target = filedialog.asksaveasfilename(defaultextension=".py", filetypes=[("Python Files", "*.py"), ("All Files", "*.*")])
         if not target:
             return False
         ok = self._write_current_buffer(target)
@@ -307,9 +318,9 @@ class PythonARunner(tk.Tk):
         return ok
 
     def _write_current_buffer(self, target):
-        data = self.editor.get('1.0', tk.END)
+        data = self.editor.get("1.0", tk.END)
         try:
-            with open(target, 'w', encoding='utf-8') as f:
+            with open(target, "w", encoding="utf-8") as f:
                 f.write(data)
             self.status_label.config(text=f"상태: 저장 완료 ({target})")
             return True
@@ -326,10 +337,7 @@ class PythonARunner(tk.Tk):
             return
         if not os.path.isfile(self.current_file):
             reason = f"실행 파일을 찾을 수 없습니다: {self.current_file}"
-            self._log_event("ERROR", reason)
-            self.status_label.config(text="상태: 실행 실패")
-            self.last_bug_text = f"[실행 실패 이유]\n{reason}"
-            messagebox.showerror("실행 실패 사유", reason)
+            self._handle_precheck_failure(reason)
             return
         if not self.save_file():
             return
@@ -343,33 +351,47 @@ class PythonARunner(tk.Tk):
 
         self.status_label.config(text="상태: 실행 준비 중")
         self._log_event("STEP", "실행 준비 시작")
+
         syntax_ok, syntax_msg = self._check_syntax(self.current_file)
         if not syntax_ok:
-            self.status_label.config(text="상태: 실행 실패(문법 오류)")
-            self._log_event("ERROR", syntax_msg)
-            self.last_bug_text = syntax_msg + "\n\n[수정 팁]\nTraceback의 라인 번호를 편집기에서 수정 후 F5로 다시 실행하세요."
-            messagebox.showerror("실행 실패 사유", syntax_msg)
+            self._handle_precheck_failure(syntax_msg)
             return
+
+        missing = self._find_missing_packages(self.current_file, cwd)
+        if missing:
+            pkg_lines = "\n".join([f"- {p}" for p in missing])
+            self._log_event("MODULE CHECK", f"누락 모듈 감지: {', '.join(missing)}")
+            approved = messagebox.askyesno(
+                "필수 모듈 설치",
+                f"실행에 필요한 모듈이 설치되지 않았습니다.\n\n{pkg_lines}\n\n자동 설치 후 실행할까요?",
+            )
+            if not approved:
+                reason = "사용자가 누락 모듈 자동 설치를 취소했습니다."
+                self._handle_precheck_failure(reason)
+                return
+
+            ok, detail = self._install_missing_packages(missing)
+            if not ok:
+                self._handle_precheck_failure(detail)
+                return
+
+            remain = self._find_missing_packages(self.current_file, cwd)
+            if remain:
+                reason = "일부 모듈 설치 후에도 누락이 남아 실행할 수 없습니다: " + ", ".join(remain)
+                self._handle_precheck_failure(reason)
+                return
 
         if os.name == "nt":
             ps_exe = "powershell.exe"
             if shutil.which(ps_exe) is None:
-                reason = "PowerShell 실행 파일을 찾을 수 없습니다. (powershell.exe)"
-                self._log_event("ERROR", reason)
-                self.status_label.config(text="상태: 실행 실패")
-                self.last_bug_text = f"[실행 실패 이유]\n{reason}"
-                messagebox.showerror("실행 실패 사유", reason)
+                self._handle_precheck_failure("PowerShell 실행 파일을 찾을 수 없습니다. (powershell.exe)")
                 return
             ps_cmd = f"& '{sys.executable}' '{self.current_file}'"
             cmd = [ps_exe, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd]
             self._log_event("TERMINAL", "PowerShell 실행 모드")
         else:
             if shutil.which(sys.executable) is None:
-                reason = f"Python 실행 파일을 찾을 수 없습니다: {sys.executable}"
-                self._log_event("ERROR", reason)
-                self.status_label.config(text="상태: 실행 실패")
-                self.last_bug_text = f"[실행 실패 이유]\n{reason}"
-                messagebox.showerror("실행 실패 사유", reason)
+                self._handle_precheck_failure(f"Python 실행 파일을 찾을 수 없습니다: {sys.executable}")
                 return
             cmd = [sys.executable, self.current_file]
             self._log_event("TERMINAL", "Python 직접 실행 모드(비-Windows)")
@@ -385,16 +407,12 @@ class PythonARunner(tk.Tk):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                encoding='utf-8',
-                errors='replace',
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
             )
         except Exception as e:
-            reason = f"프로세스 시작 실패: {e}"
-            self._log_event("ERROR", reason)
-            self.last_bug_text = f"[실행 실패 이유]\n{reason}"
-            messagebox.showerror("실행 실패 사유", reason)
-            self.status_label.config(text="상태: 실행 실패")
+            self._handle_precheck_failure(f"프로세스 시작 실패: {e}")
             return
 
         self.run_started_at = time.time()
@@ -404,16 +422,100 @@ class PythonARunner(tk.Tk):
         self.progress.start(10)
         self._log_event("STEP", "프로세스 시작 완료. 실시간 출력 수집 중")
 
-        t_out = threading.Thread(target=self._reader_worker, args=(self.process.stdout, 'STDOUT'), daemon=True)
-        t_err = threading.Thread(target=self._reader_worker, args=(self.process.stderr, 'STDERR'), daemon=True)
+        t_out = threading.Thread(target=self._reader_worker, args=(self.process.stdout, "STDOUT"), daemon=True)
+        t_err = threading.Thread(target=self._reader_worker, args=(self.process.stderr, "STDERR"), daemon=True)
         t_wait = threading.Thread(target=self._wait_worker, daemon=True)
         self.reader_threads = [t_out, t_err, t_wait]
         for t in self.reader_threads:
             t.start()
 
+    def _handle_precheck_failure(self, reason):
+        self._log_event("ERROR", reason)
+        self.status_label.config(text="상태: 실행 실패")
+        self.last_bug_text = f"[실행 실패 이유]\n{reason}"
+        messagebox.showerror("실행 실패 사유", reason)
+
+    def _collect_import_names(self, script_path):
+        try:
+            with open(script_path, "r", encoding="utf-8") as f:
+                src = f.read()
+        except UnicodeDecodeError:
+            with open(script_path, "r", encoding="cp949", errors="replace") as f:
+                src = f.read()
+
+        tree = ast.parse(src, filename=script_path)
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for n in node.names:
+                    names.add(n.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.level == 0 and node.module:
+                    names.add(node.module.split(".")[0])
+        return names
+
+    def _is_local_module(self, name, cwd):
+        return os.path.isfile(os.path.join(cwd, f"{name}.py")) or os.path.isdir(os.path.join(cwd, name))
+
+    def _find_missing_packages(self, script_path, cwd):
+        try:
+            imports = self._collect_import_names(script_path)
+        except Exception:
+            return []
+
+        stdlib = set(getattr(sys, "stdlib_module_names", []))
+        skip = {"__future__", "tkinter"}
+        missing = []
+
+        for mod in sorted(imports):
+            if mod in skip or mod in stdlib:
+                continue
+            if self._is_local_module(mod, cwd):
+                continue
+            if importlib.util.find_spec(mod) is None:
+                pkg = PACKAGE_NAME_MAP.get(mod, mod)
+                if pkg not in missing:
+                    missing.append(pkg)
+        return missing
+
+    def _install_missing_packages(self, packages):
+        self._log_event("INSTALL", "누락 모듈 자동 설치 시작")
+        self._log_event("INSTALL", "대상: " + ", ".join(packages))
+        self.status_label.config(text="상태: 모듈 설치 중")
+        self.progress.start(10)
+
+        cmd = [sys.executable, "-m", "pip", "install", *packages]
+        self._log_event("INSTALL CMD", " ".join(cmd))
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+            lines = []
+            for line in iter(proc.stdout.readline, ""):
+                lines.append(line.rstrip("\n"))
+                self._append_output(line)
+                self.update_idletasks()
+            proc.wait()
+            self.progress.stop()
+            if proc.returncode != 0:
+                tail = "\n".join(lines[-20:])
+                return False, "모듈 설치 실패(pip).\n" + tail
+            self._log_event("INSTALL", "모듈 설치 완료")
+            return True, "OK"
+        except Exception as e:
+            self.progress.stop()
+            return False, f"모듈 설치 중 예외 발생: {e}"
+
     def _reader_worker(self, stream, tag):
         try:
-            for line in iter(stream.readline, ''):
+            for line in iter(stream.readline, ""):
                 self.output_queue.put((tag, line))
         finally:
             try:
@@ -423,14 +525,14 @@ class PythonARunner(tk.Tk):
 
     def _wait_worker(self):
         code = self.process.wait()
-        self.output_queue.put(('EXIT', code))
+        self.output_queue.put(("EXIT", code))
 
     def _build_bug_report(self, reason):
         lines = self.run_stderr_chunks + self.run_stdout_chunks
         trace = []
         in_tb = False
         for line in lines:
-            if 'Traceback (most recent call last):' in line:
+            if "Traceback (most recent call last):" in line:
                 in_tb = True
                 trace = [line]
                 continue
@@ -438,9 +540,9 @@ class PythonARunner(tk.Tk):
                 trace.append(line)
 
         if trace:
-            bug_body = '\n'.join(trace[-30:])
+            bug_body = "\n".join(trace[-30:])
         else:
-            bug_body = '\n'.join(lines[-30:]) if lines else reason
+            bug_body = "\n".join(lines[-30:]) if lines else reason
 
         hint = (
             f"[실행 실패 이유]\n{reason}\n\n"
@@ -473,7 +575,7 @@ class PythonARunner(tk.Tk):
                 self._log_event("STOP ERROR", f"강제 종료 실패: {e}")
 
     def clear_output(self):
-        self.output.delete('1.0', tk.END)
+        self.output.delete("1.0", tk.END)
 
     def _append_output(self, text):
         self.output.insert(tk.END, text)
@@ -486,15 +588,15 @@ class PythonARunner(tk.Tk):
             except queue.Empty:
                 break
 
-            if tag == 'STDOUT':
+            if tag == "STDOUT":
                 self.run_stdout_chunks.append(chunk.rstrip("\n"))
                 self.last_output_at = time.time()
                 self._append_output(chunk)
-            elif tag == 'STDERR':
+            elif tag == "STDERR":
                 self.run_stderr_chunks.append(chunk.rstrip("\n"))
                 self.last_output_at = time.time()
                 self._append_output(f"[ERR] {chunk}")
-            elif tag == 'EXIT':
+            elif tag == "EXIT":
                 self._handle_process_exit(int(chunk))
 
         self.after(100, self._drain_output_queue)
@@ -589,6 +691,6 @@ class PythonARunner(tk.Tk):
         messagebox.showinfo("작성자 정보", message)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app = PythonARunner()
     app.mainloop()
