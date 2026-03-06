@@ -10,7 +10,9 @@ from tkinter import ttk, filedialog, messagebox
 
 APP_TITLE = "PythonA Runner"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-ICON_PATH = os.path.join(APP_DIR, "app_icon.png")
+ICON_DIR = os.path.join(APP_DIR, "assets", "icons")
+ICON_ICO_PATH = os.path.join(ICON_DIR, "오아시스_로고01.ico")
+ICON_PNG_PATH = os.path.join(ICON_DIR, "오아시스_로고01.png")
 AUTHOR_NAME = "PHIL JK"
 AUTHOR_EMAIL = "kacang@nate.com"
 AUTHOR_HP = "+62 812 8094 3179"
@@ -23,6 +25,7 @@ class PythonARunner(tk.Tk):
         self.geometry("1380x860")
         self.minsize(1100, 700)
         self._icon_image = None
+        self._logo_image = None
         self._configure_icon()
 
         self.current_file = None
@@ -86,6 +89,10 @@ class PythonARunner(tk.Tk):
         self.file_label = ttk.Label(editor_top, text="파일: (없음)")
         self.file_label.pack(side=tk.LEFT)
 
+        self.logo_label = ttk.Label(editor_top)
+        self.logo_label.pack(side=tk.RIGHT)
+        self._configure_logo_label()
+
         self.editor = tk.Text(editor_frame, wrap=tk.NONE, undo=True)
         self.editor.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
 
@@ -146,13 +153,28 @@ class PythonARunner(tk.Tk):
         self.bind('<Shift-F5>', lambda e: self.stop_run())
 
     def _configure_icon(self):
-        if not os.path.isfile(ICON_PATH):
+        if os.path.isfile(ICON_ICO_PATH):
+            try:
+                self.iconbitmap(default=ICON_ICO_PATH)
+            except Exception:
+                pass
+
+        if os.path.isfile(ICON_PNG_PATH):
+            try:
+                self._icon_image = tk.PhotoImage(file=ICON_PNG_PATH)
+                self.iconphoto(True, self._icon_image)
+            except Exception:
+                pass
+
+    def _configure_logo_label(self):
+        if not os.path.isfile(ICON_PNG_PATH):
+            self.logo_label.configure(text="")
             return
         try:
-            self._icon_image = tk.PhotoImage(file=ICON_PATH)
-            self.iconphoto(True, self._icon_image)
+            self._logo_image = tk.PhotoImage(file=ICON_PNG_PATH)
+            self.logo_label.configure(image=self._logo_image)
         except Exception:
-            pass
+            self.logo_label.configure(text="")
 
     def _now(self):
         return time.strftime("%H:%M:%S")
