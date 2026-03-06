@@ -4,6 +4,7 @@ import time
 import queue
 import threading
 import subprocess
+import shutil
 import py_compile
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -25,7 +26,6 @@ class PythonARunner(tk.Tk):
         self.geometry("1380x860")
         self.minsize(1100, 700)
         self._icon_image = None
-        self._logo_image = None
         self._configure_icon()
 
         self.current_file = None
@@ -89,10 +89,6 @@ class PythonARunner(tk.Tk):
         self.file_label = ttk.Label(editor_top, text="파일: (없음)")
         self.file_label.pack(side=tk.LEFT)
 
-        self.logo_label = ttk.Label(editor_top)
-        self.logo_label.pack(side=tk.RIGHT)
-        self._configure_logo_label()
-
         self.editor = tk.Text(editor_frame, wrap=tk.NONE, undo=True)
         self.editor.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
 
@@ -112,7 +108,7 @@ class PythonARunner(tk.Tk):
         self.status_label = ttk.Label(output_top, text="상태: 대기")
         self.status_label.pack(side=tk.RIGHT)
 
-        self.output = tk.Text(output_frame, wrap=tk.NONE, bg="#10151c", fg="#d7e6f5")
+        self.output = tk.Text(output_frame, wrap=tk.NONE, bg="#0c1117", fg="#cfe6ff")
         self.output.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
 
     def _build_menu(self):
@@ -166,21 +162,30 @@ class PythonARunner(tk.Tk):
             except Exception:
                 pass
 
-    def _configure_logo_label(self):
-        if not os.path.isfile(ICON_PNG_PATH):
-            self.logo_label.configure(text="")
-            return
-        try:
-            self._logo_image = tk.PhotoImage(file=ICON_PNG_PATH)
-            self.logo_label.configure(image=self._logo_image)
-        except Exception:
-            self.logo_label.configure(text="")
-
     def _now(self):
         return time.strftime("%H:%M:%S")
 
     def _log_event(self, label, message):
         self._append_output(f"[{self._now()}] [{label}] {message}\n")
+
+    def _pick_auto_open_file(self, folder):
+        candidates = ["main.py", "app.py", "run.py", "start.py", "launcher.py"]
+        for name in candidates:
+            full = os.path.join(folder, name)
+            if os.path.isfile(full):
+                return full
+
+        py_files = []
+        try:
+            for name in os.listdir(folder):
+                full = os.path.join(folder, name)
+                if os.path.isfile(full) and name.lower().endswith(".py"):
+                    py_files.append(full)
+        except Exception:
+            return None
+
+        py_files.sort(key=lambda p: os.path.basename(p).lower())
+        return py_files[0] if py_files else None
 
     def choose_file(self):
         path = filedialog.askopenfilename(filetypes=[("Python Files", "*.py"), ("All Files", "*.*")])
@@ -193,6 +198,13 @@ class PythonARunner(tk.Tk):
             return
         self.current_folder = os.path.abspath(folder)
         self._load_tree(self.current_folder)
+
+        auto_file = self._pick_auto_open_file(self.current_folder)
+        if auto_file:
+            self.open_file(auto_file)
+            self._log_event("AUTO OPEN", auto_file)
+        else:
+            self._log_event("AUTO OPEN", "실행 가능한 .py 파일을 찾지 못했습니다.")
 
     def _load_tree(self, root_path):
         self.tree.delete(*self.tree.get_children())
@@ -285,10 +297,7 @@ class PythonARunner(tk.Tk):
         return self._write_current_buffer(self.current_file)
 
     def save_file_as(self):
-        target = filedialog.asksaveasfilename(
-            defaultextension='.py',
-            filetypes=[("Python Files", "*.py"), ("All Files", "*.*")],
-        )
+        target = filedialog.asksaveasfilename(defaultextension='.py', filetypes=[("Python Files", "*.py"), ("All Files", "*.*")])
         if not target:
             return False
         ok = self._write_current_buffer(target)
@@ -315,6 +324,13 @@ class PythonARunner(tk.Tk):
         if not self.current_file:
             messagebox.showwarning("안내", "먼저 .py 파일을 불러오세요.")
             return
+        if not os.path.isfile(self.current_file):
+            reason = f"실행 파일을 찾을 수 없습니다: {self.current_file}"
+            self._log_event("ERROR", reason)
+            self.status_label.config(text="상태: 실행 실패")
+            self.last_bug_text = f"[실행 실패 이유]\n{reason}"
+            messagebox.showerror("실행 실패 사유", reason)
+            return
         if not self.save_file():
             return
 
@@ -323,7 +339,6 @@ class PythonARunner(tk.Tk):
         self.run_stderr_chunks = []
         self.clear_output()
 
-        cmd = [sys.executable, self.current_file]
         cwd = os.path.dirname(self.current_file)
 
         self.status_label.config(text="상태: 실행 준비 중")
@@ -333,9 +348,32 @@ class PythonARunner(tk.Tk):
             self.status_label.config(text="상태: 실행 실패(문법 오류)")
             self._log_event("ERROR", syntax_msg)
             self.last_bug_text = syntax_msg + "\n\n[수정 팁]\nTraceback의 라인 번호를 편집기에서 수정 후 F5로 다시 실행하세요."
+            messagebox.showerror("실행 실패 사유", syntax_msg)
             return
 
-        self._log_event("STEP", f"문법 검사 통과: {self.current_file}")
+        if os.name == "nt":
+            ps_exe = "powershell.exe"
+            if shutil.which(ps_exe) is None:
+                reason = "PowerShell 실행 파일을 찾을 수 없습니다. (powershell.exe)"
+                self._log_event("ERROR", reason)
+                self.status_label.config(text="상태: 실행 실패")
+                self.last_bug_text = f"[실행 실패 이유]\n{reason}"
+                messagebox.showerror("실행 실패 사유", reason)
+                return
+            ps_cmd = f"& '{sys.executable}' '{self.current_file}'"
+            cmd = [ps_exe, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd]
+            self._log_event("TERMINAL", "PowerShell 실행 모드")
+        else:
+            if shutil.which(sys.executable) is None:
+                reason = f"Python 실행 파일을 찾을 수 없습니다: {sys.executable}"
+                self._log_event("ERROR", reason)
+                self.status_label.config(text="상태: 실행 실패")
+                self.last_bug_text = f"[실행 실패 이유]\n{reason}"
+                messagebox.showerror("실행 실패 사유", reason)
+                return
+            cmd = [sys.executable, self.current_file]
+            self._log_event("TERMINAL", "Python 직접 실행 모드(비-Windows)")
+
         self._log_event("RUN", " ".join(cmd))
         self._log_event("CWD", cwd)
         self._append_output("\n")
@@ -354,8 +392,8 @@ class PythonARunner(tk.Tk):
         except Exception as e:
             reason = f"프로세스 시작 실패: {e}"
             self._log_event("ERROR", reason)
-            self.last_bug_text = reason
-            messagebox.showerror("실행 실패", reason)
+            self.last_bug_text = f"[실행 실패 이유]\n{reason}"
+            messagebox.showerror("실행 실패 사유", reason)
             self.status_label.config(text="상태: 실행 실패")
             return
 
@@ -491,9 +529,16 @@ class PythonARunner(tk.Tk):
         else:
             self.status_label.config(text="상태: 실행 실패")
             self._build_bug_report(reason)
+            fail_summary = self._failure_summary(reason)
+            self._log_event("FAIL SUMMARY", fail_summary.replace("\n", " | "))
+            messagebox.showerror("실행 실패 사유", fail_summary)
 
     def _exit_reason(self, code):
         err_text = "\n".join(self.run_stderr_chunks[-60:])
+        if "No such file or directory" in err_text:
+            return "실행 경로 또는 대상 파일이 없어 실행 실패했습니다."
+        if "is not recognized as an internal or external command" in err_text:
+            return "필수 명령(파이썬/PowerShell)을 찾지 못해 실행 실패했습니다."
         if code == -15:
             return "사용자 중지(terminate)로 종료되었습니다."
         if code == -9:
@@ -515,6 +560,16 @@ class PythonARunner(tk.Tk):
         if err_text.strip():
             return "예외 발생으로 실행 실패했습니다. stderr를 확인하세요."
         return "비정상 종료(return code != 0)되었습니다."
+
+    def _failure_summary(self, reason):
+        tail_err = "\n".join(self.run_stderr_chunks[-8:]).strip()
+        tail_out = "\n".join(self.run_stdout_chunks[-5:]).strip()
+        parts = [f"실행 실패 이유: {reason}"]
+        if tail_err:
+            parts.append(f"[최근 STDERR]\n{tail_err}")
+        elif tail_out:
+            parts.append(f"[최근 출력]\n{tail_out}")
+        return "\n\n".join(parts)
 
     def show_bug_details(self):
         messagebox.showinfo("버그내용", self.last_bug_text)
